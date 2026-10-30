@@ -6,29 +6,53 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract project
+      - name: Extract Android project
         run: |
           mkdir project
-          unzip -q *.zip -d project
+          unzip -q coloros-clock.zip -d project
+
+      - name: Find project and Gradle version
+        id: project
+        run: |
+          SETTINGS=$(find project -name settings.gradle.kts -print -quit)
+          if [ -z "$SETTINGS" ]; then
+            echo "Android project settings.gradle.kts not found"
+            exit 1
+          fi
+          ROOT=$(dirname "$SETTINGS")
+          PROPERTIES="$ROOT/gradle/wrapper/gradle-wrapper.properties"
+          if [ ! -f "$PROPERTIES" ]; then
+            echo "Gradle wrapper properties not found"
+            exit 1
+          fi
+          URL=$(grep '^distributionUrl=' "$PROPERTIES" | cut -d= -f2-)
+          VERSION=$(echo "$URL" | sed -E 's/.*gradle-([0-9.]+)-(bin|all)\.zip.*/\1/')
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+          echo "gradle_version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ steps.project.outputs.gradle_version }}
 
       - name: Build APK
         run: |
-          cd "$(dirname "$(find project -name gradlew | head -n 1)")"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          cd "${{ steps.project.outputs.root }}"
+          gradle assembleDebug
 
       - name: Save APK
         uses: actions/upload-artifact@v4
         with:
           name: Android-APK
-          path: project/**/build/outputs/apk/debug/*.apk
+          path: ${{ steps.project.outputs.root }}/app/build/outputs/apk/debug/*.apk
